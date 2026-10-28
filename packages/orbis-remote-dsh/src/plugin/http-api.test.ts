@@ -96,6 +96,7 @@ async function invoke(input: {
   readonly recorder?: OrbisRawDshEventRecorderPort;
   readonly replayer?: OrbisRawDshEventReplayerPort;
   readonly body?: Buffer;
+  readonly allowedHosts?: readonly string[];
   readonly headers?: Record<string, string>;
   readonly url: string;
 }): Promise<TestResponse> {
@@ -110,6 +111,7 @@ async function invoke(input: {
     diagnostics: input.diagnostics,
     recorder: input.recorder,
     replayer: input.replayer,
+    allowedHosts: input.allowedHosts,
   }).handler(
     request,
     response as unknown as ServerResponse,
@@ -319,5 +321,79 @@ describe("support diagnostics HTTP route", () => {
 
     expect(response.responseStatus).toBe(405);
     expect(exportDiagnostics).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("allowedHosts non-loopback trust", () => {
+  const recorder = fakeRecorder();
+
+  it("refuses a non-loopback host by default (regression guard)", async () => {
+    const response = await invoke({
+      host: "100.111.111.88:3090",
+      method: "GET",
+      recorder,
+      url: "/orbis/recording",
+    });
+
+    expect(response.responseStatus).toBe(403);
+    expect(recorder.start).not.toHaveBeenCalled();
+  });
+
+  it("admits a host listed in allowedHosts (with or without port)", async () => {
+    const withPort = await invoke({
+      allowedHosts: ["100.111.111.88"],
+      host: "100.111.111.88:3090",
+      method: "GET",
+      recorder,
+      url: "/orbis/recording",
+    });
+    const withoutPort = await invoke({
+      allowedHosts: ["100.111.111.88"],
+      host: "100.111.111.88",
+      method: "GET",
+      recorder,
+      url: "/orbis/recording",
+    });
+
+    expect(withPort.responseStatus).toBe(200);
+    expect(withoutPort.responseStatus).toBe(200);
+    expect(recorder.start).not.toHaveBeenCalled();
+  });
+
+  it("still refuses a non-listed public host even when allowedHosts is set", async () => {
+    const response = await invoke({
+      allowedHosts: ["100.111.111.88"],
+      host: "203.0.113.7:3090",
+      method: "GET",
+      recorder,
+      url: "/orbis/recording",
+    });
+
+    expect(response.responseStatus).toBe(403);
+    expect(recorder.start).not.toHaveBeenCalled();
+  });
+
+  it("keeps the DNS-rebind / cross-site fence even for an allowed host", async () => {
+    const crossSite = await invoke({
+      allowedHosts: ["100.111.111.88"],
+      headers: { "sec-fetch-site": "cross-site" },
+      host: "100.111.111.88:3090",
+      method: "GET",
+      recorder,
+      url: "/orbis/recording",
+    });
+    const badOrigin = await invoke({
+      allowedHosts: ["100.111.111.88"],
+      headers: { origin: "http://evil.test" },
+      host: "100.111.111.88:3090",
+      method: "GET",
+      recorder,
+      url: "/orbis/recording",
+    });
+
+    expect(crossSite.responseStatus).toBe(403);
+    expect(badOrigin.responseStatus).toBe(403);
+    expect(recorder.start).not.toHaveBeenCalled();
   });
 });

@@ -246,6 +246,16 @@ The plugin's optional `workspaceRoots` array controls the exposed roots and
 defaults to the browse directory picker's Home location. Every request resolves symlinks
 and rechecks containment before listing or registration.
 
+The plugin's optional `allowedHosts` array widens the privileged Orbis management
+route beyond its default loopback-only trust. Each entry is a host name; ports are
+ignored and credentials must be absent. When empty (the default), the route is
+reachable only from `127.0.0.1`, `::1`, and `localhost`, preserving the original
+behavior. Because pairing invitations and credentials are sensitive, list here
+only addresses you genuinely intend to expose (for example a known Tailscale or
+LAN address), and never advertise `127.0.0.1`/`localhost` to a physical phone.
+The DNS-rebound `Host`/Origin and `sec-fetch-site: cross-site` fences stay active
+for every request regardless of `allowedHosts`.
+
 A new `orbis.sessions.create` request must pass its opaque workspace id as
 `workspaceRef`; it never accepts a filesystem path:
 

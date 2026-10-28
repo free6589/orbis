@@ -52,7 +52,10 @@ function header(request: IncomingMessage, name: string): string | undefined {
  * while the DSH web server binds loopback, and this additional Host and Origin
  * fence prevents a DNS-rebound page from reading this independent route.
  */
-function isTrustedLoopbackRequest(request: IncomingMessage): boolean {
+function isTrustedLoopbackRequest(
+  request: IncomingMessage,
+  allowedHosts: readonly string[] = [],
+): boolean {
   const host = header(request, "host");
   if (!host) return false;
   let authority: URL;
@@ -71,11 +74,13 @@ function isTrustedLoopbackRequest(request: IncomingMessage): boolean {
     return false;
   }
   const hostname = authority.hostname.toLowerCase();
+  const allowed = normalizedAllowedHosts(allowedHosts);
   if (
     hostname !== "127.0.0.1" &&
     hostname !== "::1" &&
     hostname !== "[::1]" &&
-    hostname !== "localhost"
+    hostname !== "localhost" &&
+    !allowed.has(hostname)
   ) {
     return false;
   }
@@ -186,18 +191,43 @@ export interface OrbisHttpRouteOptions {
   readonly diagnostics?: OrbisDshDiagnosticsPort;
   readonly recorder?: OrbisRawDshEventRecorderPort;
   readonly replayer?: OrbisRawDshEventReplayerPort;
+  /**
+   * Host names (without scheme; ports are ignored) that may reach this route in
+   * addition to loopback. Defaults to empty, preserving loopback-only behavior.
+   */
+  readonly allowedHosts?: readonly string[];
+}
+
+/**
+ * Normalize a configured allow-list into a set of lowercased host names. Ports
+ * are stripped and credentials rejected so a config typo cannot widen the fence.
+ */
+function normalizedAllowedHosts(allowedHosts: readonly string[]): Set<string> {
+  const set = new Set<string>();
+  for (const entry of allowedHosts) {
+    try {
+      const url = new URL("http://" + entry);
+      const host = url.hostname.toLowerCase();
+      if (host.length > 0 && url.username === "" && url.password === "") {
+        set.add(host);
+      }
+    } catch {
+      // Skip entries that are not valid host strings; a typo must not widen access.
+    }
+  }
+  return set;
 }
 
 export function createOrbisHttpRoute(
   service: OrbisDshHostService,
   options: OrbisHttpRouteOptions = {},
 ): OrbisHttpRoute {
-  const { diagnostics, recorder, replayer } = options;
+  const { diagnostics, recorder, replayer, allowedHosts } = options;
   return {
     kind: "prefix",
     path: "/orbis",
     handler: async (request, response) => {
-      if (!isTrustedLoopbackRequest(request)) {
+      if (!isTrustedLoopbackRequest(request, allowedHosts)) {
         failure(response, 403, new Error("Orbis management is available only on loopback"));
         return;
       }

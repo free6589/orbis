@@ -99,6 +99,13 @@ export interface Config {
   logPath?: string;
   /** Server directories exposed to paired clients. Defaults to the directory picker's Home. */
   workspaceRoots?: string[];
+  /**
+   * Host names (without scheme or port) that may reach the privileged Orbis
+   * management route in addition to loopback. Defaults to empty, which keeps the
+   * original loopback-only behavior. Pairing invitations and credentials are
+   * sensitive, so only list addresses you truly intend to expose.
+   */
+  allowedHosts?: string[];
 }
 
 export const Config: z<Config> = z.object({
@@ -109,6 +116,7 @@ export const Config: z<Config> = z.object({
   logPath: z.string(),
   statePath: z.string(),
   workspaceRoots: z.array(z.string()),
+  allowedHosts: z.array(z.string()),
 });
 
 export function isRawDshEventRecordingEnabled(
@@ -553,6 +561,7 @@ export async function apply(context: Context, config?: Config): Promise<void> {
         diagnostics,
         recorder: rawEventRecorder,
         replayer: rawEventReplayer,
+        allowedHosts: config?.allowedHosts?.length ? config.allowedHosts : undefined,
       }),
     );
     void service.connectIfAvailable().catch(() => undefined);
